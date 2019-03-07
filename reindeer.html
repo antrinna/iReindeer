@@ -25,7 +25,7 @@
 Cesium.Ion.defaultAccessToken = 'YOUR_ION_ACCESS_TOKEN';
 
 var viewer = new Cesium.Viewer('cesiumContainer',{
-    infoBox : false,
+    infoBox : true,
     selectionIndicator : false,
     shadows : true,
     shouldAnimate : true//,
@@ -49,9 +49,9 @@ viewer.entities.removeAll();
 
 
 
-////add grazing polygon, by coordinates, green semi-transparent
+////add foraging polygon, by coordinates, green semi-transparent
 
-var sample1 = viewer.entities.add({
+var forage1 = viewer.entities.add({
     name : 'Taimyr_1',
     polygon : {
     hierarchy : Cesium.Cartesian3.fromDegreesArray([
@@ -65,8 +65,8 @@ var sample1 = viewer.entities.add({
 var handler1 = new Cesium.ScreenSpaceEventHandler(canvas);
 handler1.setInputAction(function(movement) {
     var pickedObject = scene.pick(movement.position);
-    if (Cesium.defined(pickedObject) && (pickedObject.id === sample1)) {
-        sample1.polygon.material = Cesium.Color.YELLOW;
+    if (Cesium.defined(pickedObject) && (pickedObject.id === forage1)) {
+        forage1.polygon.material = Cesium.Color.YELLOW;
     }
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -86,7 +86,7 @@ var hpr = new Cesium.HeadingPitchRoll(heading - Cesium.Math.PI, pitch, roll);
 var orientation = Cesium.Transforms.headingPitchRollQuaternion(initEntPosition, hpr);
 
 var reindeer = viewer.entities.add({
-    name : 'Reindeer_model/scene.gltf',
+    name : 'iReindeer',
     position : initEntPosition,
     orientation : orientation,
     model : {
@@ -94,12 +94,16 @@ var reindeer = viewer.entities.add({
 		heightReference : Cesium.HeightReference.CLAMP_TO_GROUND,
         minimumPixelSize : 128,
         maximumScale : 20000
-    }
+    },
+	health : 100,
+	idleTimer : 0,
+	movingTimer : 0
 });
 
-viewer.selectedEntity = new Cesium.Entity({
-	  name : 'ireindeer'
-  });
+// show reindeer health
+reindeer.description = "Health Points: " + reindeer.health;
+viewer.selectedEntity = reindeer;
+
 
 var initCamPosition = Cesium.Cartesian3.fromDegrees(initLon, initLat, initHeight);
 camera.flyTo({
@@ -110,7 +114,6 @@ camera.flyTo({
         roll : roll
     }
 });
-
 
 
 ////set up custom controls
@@ -132,7 +135,8 @@ var flags = {
     moveForward : false,
     moveBackward : false,
     moveLeft : false,
-    moveRight : false
+    moveRight : false,
+	eat : false
 };
 
 //key handlers - main control
@@ -153,7 +157,11 @@ function getFlagForKeyCode(keyCode) {
     case 'D'.charCodeAt(0):
         return 'moveRight';
     case 'A'.charCodeAt(0):
-        return 'moveLeft';		
+        return 'moveLeft';
+    case 32:
+        return 'eat';
+    case 13:
+        return 'eat';
     default:
         return undefined;
     }
@@ -194,11 +202,11 @@ viewer.clock.onTick.addEventListener(function(clock) {
         camera.lookRight(turnRate);
     }
     
-    var cameraLat = ellipsoid.cartesianToCartographic(camera.position).latitude;
-    var cameraLon = ellipsoid.cartesianToCartographic(camera.position).longitude;
+	var cameraLat = ellipsoid.cartesianToCartographic(camera.position).latitude;
+	var cameraLon = ellipsoid.cartesianToCartographic(camera.position).longitude;
 	var cameraHeading = camera.heading;
 	
-    //move the model together with the camera. Simplify calculation to planar right angle triangle, considering lon & lat length difference of 2.75x at 70 lat
+	//move the model together with the camera. Simplify calculation to planar right angle triangle, considering lon & lat length difference of 2.75x at 70 lat
 	var offset = 0.0001;
 	var deerLon = cameraLon + 2.75 * offset * Math.sin(cameraHeading);
 	var deerLat = cameraLat + offset * Math.cos(cameraHeading);
@@ -210,14 +218,14 @@ viewer.clock.onTick.addEventListener(function(clock) {
 	var deerHeight = scene.globe.getHeight(deerlla);
 	deerposition = new Cesium.Cartesian3.fromRadians(deerLon, deerLat, deerHeight);
 	reindeer.position = deerposition;	
-    
-    //adjust model orientation with the camera's
-    var newHPR = new Cesium.HeadingPitchRoll(cameraHeading - Cesium.Math.PI, 0, 0);
-    reindeer.orientation = Cesium.Transforms.headingPitchRollQuaternion(deerposition, newHPR);
+	
+	//adjust model orientation with the camera's
+	var newHPR = new Cesium.HeadingPitchRoll(cameraHeading - Cesium.Math.PI, 0, 0);
+	reindeer.orientation = Cesium.Transforms.headingPitchRollQuaternion(deerposition, newHPR);
 	
 	//make sure camera doesn't go underground (reindeer's & camera's height is odd, using globe height for reasonable value)
 	var lla = ellipsoid.cartesianToCartographic(camera.position);
-    var height = scene.globe.getHeight(lla);
+	var height = scene.globe.getHeight(lla);
 
 	//consider cases when reindeer gets out of the view due to slope - adjust camera hight. TODO: also adjust camera pitch?	
 	var camHeight = (height + 20 >= deerHeight + 300) ? (height + 20) : (deerHeight + 300);
@@ -228,6 +236,32 @@ viewer.clock.onTick.addEventListener(function(clock) {
 		camera.position = camposition; 
 	}	
 
+	
+	////health
+	
+	//decrease health with time
+	if(reindeer.idleTimer >= 500){
+		reindeer.idleTimer = 0;
+		reindeer.health -= 1;
+		reindeer.description = "Health Points: " + reindeer.health;
+	}
+	reindeer.idleTimer += 1
+	
+	//decrease health at higher rate with when moving
+	if (flags.moveForward || flags.moveBackward || flags.moveLeft || flags.moveRight){	
+		if(reindeer.movingTimer >= 100){
+			reindeer.movingTimer = 0;
+			reindeer.health -= 1;
+			reindeer.description = "Health Points: " + reindeer.health;
+		}
+		reindeer.movingTimer += 1
+	}
+	
+	//increase health if eat keys are pressed
+	if (flags.eat) {
+        reindeer.health += 1;
+		reindeer.description = "Health Points: " + reindeer.health;
+    }
 });
 
   </script>
