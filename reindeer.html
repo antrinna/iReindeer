@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Use correct character set. -->
+  <meta charset="utf-8">
+  <!-- Tell IE to use the latest, best version. -->
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <!-- Make the application on mobile take up the full browser screen and disable user scaling. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+  <title>iReindeer</title>
+  <script src="../../Build/Cesium/Cesium.js"></script>
+  <style>
+      @import url(../../Build/Cesium/Widgets/widgets.css);
+      html, body, #cesiumContainer {
+          width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+      }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <script>
+
+////initiate application
+
+Cesium.Ion.defaultAccessToken = 'YOUR_ION_ACCESS_TOKEN';
+
+var viewer = new Cesium.Viewer('cesiumContainer',{
+    infoBox : false,
+    selectionIndicator : false,
+    shadows : true,
+    shouldAnimate : true//,
+});
+
+var scene = viewer.scene;
+var camera = viewer.camera;
+var ellipsoid = scene.globe.ellipsoid;
+var canvas = viewer.canvas;
+
+//add terrain
+viewer.terrainProvider = Cesium.createWorldTerrain();
+
+//Enable depth testing so things behind the terrain disappear.
+scene.globe.depthTestAgainstTerrain = true;
+
+// set lighting to true - becomes too dark... adjust position of the sun?
+//viewer.scene.globe.enableLighting = true;
+
+viewer.entities.removeAll();
+
+
+
+////add grazing polygon, by coordinates, green semi-transparent
+
+var sample1 = viewer.entities.add({
+    name : 'Taimyr_1',
+    polygon : {
+    hierarchy : Cesium.Cartesian3.fromDegreesArray([
+                              91.4,68.9, 91.4,69,
+							  91.6,69, 91.6,68.9]),
+    material : Cesium.Color.GREEN.withAlpha(0.5)
+    }
+});
+
+//add polygon click event
+var handler1 = new Cesium.ScreenSpaceEventHandler(canvas);
+handler1.setInputAction(function(movement) {
+    var pickedObject = scene.pick(movement.position);
+    if (Cesium.defined(pickedObject) && (pickedObject.id === sample1)) {
+        sample1.polygon.material = Cesium.Color.YELLOW;
+    }
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+
+
+////add the model and initial camera position
+
+var initLon = 91.42;
+var initLat = 68.88;
+var initHeight = 300;
+var initEntPosition = Cesium.Cartesian3.fromDegrees(initLon, initLat, initHeight);
+
+var heading = Cesium.Math.toRadians(45);
+var pitch = 0;	//reindeer pitch is on his side!!!
+var roll = 0;
+var hpr = new Cesium.HeadingPitchRoll(heading - Cesium.Math.PI, pitch, roll);
+var orientation = Cesium.Transforms.headingPitchRollQuaternion(initEntPosition, hpr);
+
+var reindeer = viewer.entities.add({
+    name : 'Reindeer_model/scene.gltf',
+    position : initEntPosition,
+    orientation : orientation,
+    model : {
+        uri : 'Reindeer_model/scene.gltf',
+		heightReference : Cesium.HeightReference.CLAMP_TO_GROUND,
+        minimumPixelSize : 128,
+        maximumScale : 20000
+    }
+});
+
+viewer.selectedEntity = new Cesium.Entity({
+	  name : 'ireindeer'
+  });
+
+var initCamPosition = Cesium.Cartesian3.fromDegrees(initLon, initLat, initHeight);
+camera.flyTo({
+    destination : initCamPosition,
+    orientation : {
+        heading : heading,
+        pitch : pitch,
+        roll : roll
+    }
+});
+
+
+
+////set up custom controls
+
+// needed to put focus on the canvas
+canvas.setAttribute('tabindex', '0'); 
+canvas.onclick = function() {
+    canvas.focus();
+};
+
+// disable the default event handlers
+scene.screenSpaceCameraController.enableRotate = false;
+scene.screenSpaceCameraController.enableTranslate = false;
+scene.screenSpaceCameraController.enableZoom = false;
+scene.screenSpaceCameraController.enableTilt = false;
+scene.screenSpaceCameraController.enableLook = false;
+
+var flags = {
+    moveForward : false,
+    moveBackward : false,
+    moveLeft : false,
+    moveRight : false
+};
+
+//key handlers - main control
+function getFlagForKeyCode(keyCode) {
+    switch (keyCode) {
+    case 38:
+        return 'moveForward';
+    case 40:
+        return 'moveBackward';
+    case 39:
+        return 'moveRight';
+    case 37:
+        return 'moveLeft';
+    case 'W'.charCodeAt(0):
+        return 'moveForward';
+    case 'S'.charCodeAt(0):
+        return 'moveBackward';
+    case 'D'.charCodeAt(0):
+        return 'moveRight';
+    case 'A'.charCodeAt(0):
+        return 'moveLeft';		
+    default:
+        return undefined;
+    }
+}
+
+document.addEventListener('keydown', function(e) {
+    var flagName = getFlagForKeyCode(e.keyCode);
+    if (typeof flagName !== 'undefined') {
+        flags[flagName] = true;
+    }
+}, false);
+
+document.addEventListener('keyup', function(e) {
+    var flagName = getFlagForKeyCode(e.keyCode);
+    if (typeof flagName !== 'undefined') {
+        flags[flagName] = false;
+    }
+}, false);
+
+
+//move camera and the model based on key controls
+viewer.clock.onTick.addEventListener(function(clock) {
+
+	var moveRate = 30;
+    var turnRate = 0.02;	
+	
+	//move camera according to pressed key
+    if (flags.moveForward) {
+        camera.moveForward(moveRate);
+    }
+    if (flags.moveBackward) {
+        camera.moveBackward(moveRate);
+    }
+    if (flags.moveLeft) {
+        camera.lookRight(-turnRate);
+    }
+    if (flags.moveRight) {
+        camera.lookRight(turnRate);
+    }
+    
+    var cameraLat = ellipsoid.cartesianToCartographic(camera.position).latitude;
+    var cameraLon = ellipsoid.cartesianToCartographic(camera.position).longitude;
+	var cameraHeading = camera.heading;
+	
+    //move the model together with the camera. Simplify calculation to planar right angle triangle, considering lon & lat length difference of 2.75x at 70 lat
+	var offset = 0.0001;
+	var deerLon = cameraLon + 2.75 * offset * Math.sin(cameraHeading);
+	var deerLat = cameraLat + offset * Math.cos(cameraHeading);
+	var cameraHeight = ellipsoid.cartesianToCartographic(camera.position).height;
+	var deerposition = new Cesium.Cartesian3.fromRadians(deerLon, deerLat, cameraHeight - 250);
+	
+	//clarify deer height value
+	var deerlla = ellipsoid.cartesianToCartographic(deerposition);
+	var deerHeight = scene.globe.getHeight(deerlla);
+	deerposition = new Cesium.Cartesian3.fromRadians(deerLon, deerLat, deerHeight);
+	reindeer.position = deerposition;	
+    
+    //adjust model orientation with the camera's
+    var newHPR = new Cesium.HeadingPitchRoll(cameraHeading - Cesium.Math.PI, 0, 0);
+    reindeer.orientation = Cesium.Transforms.headingPitchRollQuaternion(deerposition, newHPR);
+	
+	//make sure camera doesn't go underground (reindeer's & camera's height is odd, using globe height for reasonable value)
+	var lla = ellipsoid.cartesianToCartographic(camera.position);
+    var height = scene.globe.getHeight(lla);
+
+	//consider cases when reindeer gets out of the view due to slope - adjust camera hight. TODO: also adjust camera pitch?	
+	var camHeight = (height + 20 >= deerHeight + 300) ? (height + 20) : (deerHeight + 300);
+	var camposition = new Cesium.Cartesian3.fromRadians(cameraLon, cameraLat, camHeight);
+	
+	//at the beginning camposition is not established. wait till it's a #
+	if (!isNaN(camposition.x)){
+		camera.position = camposition; 
+	}	
+
+});
+
+  </script>
+</body>
+</html>
